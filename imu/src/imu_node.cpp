@@ -1,5 +1,6 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
+#include <geometry_msgs/Vector3.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 #include <sstream>
@@ -42,12 +43,25 @@ int main(int argc, char **argv)
     nh.param("publish_rate", publishRate, 50.0);
     std::string dev = UART_DEVICE;
     nh.param<std::string>("dev", dev, "/dev/serial0");
-    std::cout << "publish_rate: " << publishRate << "  device: " << dev << std::endl;
+    bool diagnostics = false;
+    nh.param("diagnostics", diagnostics, false);
+    int commandSteps = 50;
+    nh.param("command_steps", commandSteps, 50);
+    std::cout << "publish_rate: " << publishRate << "command_steps: " << commandSteps << "  device: " << dev << "  diagnostics: " << diagnostics << std::endl;
 
     /**
      * Publish imu sensor
      */
     ros::Publisher imu_pub = nh.advertise<sensor_msgs::Imu>("imu/data", 50);
+
+    /**
+     * Publish imu sensor
+     */
+    ros::Publisher angle_cmd_pub = nh.advertise<geometry_msgs::Vector3>("/angle_cmd",1);
+    geometry_msgs::Vector3 angle_cmd_msg;
+    angle_cmd_msg.x = 0.0;
+    angle_cmd_msg.y = 0.0;
+    angle_cmd_msg.z = 0.0;
 
     /**
      * Node parameters
@@ -57,7 +71,7 @@ int main(int argc, char **argv)
     /**
      * BNO080 initialization
      */
-    bno080_rvc_debugging(true);
+    bno080_rvc_debugging(diagnostics);
     bno080_rvc_init(dev.c_str(), RSTN_GPIO_PIN, imu_callback);
 
     /*
@@ -67,6 +81,7 @@ int main(int argc, char **argv)
     ros::Time     last_time    = current_time;
     ros::Duration elapsed;
 
+    int n = 0;
     while (ros::ok())
     {
         ros::spinOnce();    // check for incoming messages
@@ -110,7 +125,21 @@ int main(int argc, char **argv)
                  * in the constructor above.
                  */
                 imu_pub.publish(imu);
+
+                // send angle command
+                if ( (n % commandSteps) == 0 )
+                {
+                    angle_cmd_msg.y = report.roll * DEG2RAD;
+                    if ( angle_cmd_msg.y > 15.0 * DEG2RAD )
+                        angle_cmd_msg.y = 15.0 * DEG2RAD;
+                    if ( angle_cmd_msg.y < -15.0 * DEG2RAD )
+                        angle_cmd_msg.y = -15.0 * DEG2RAD;
+                    ROS_INFO_STREAM("roll: " << angle_cmd_msg.x << " pitch: " << angle_cmd_msg.y << " yaw: " << angle_cmd_msg.z);
+                    angle_cmd_pub.publish(angle_cmd_msg);
+                }
             }
+
+            n++;
         }
 
         last_time = current_time;
